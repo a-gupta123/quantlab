@@ -1,17 +1,31 @@
+# Python
 .venv/
 __pycache__/
 *.py[cod]
-.env
-.python-version.local
+.pytest_cache/
+.ruff_cache/
 
-# QuantLab
+# Node
+node_modules/
+
+# Secrets and local config (use .env.example as the template)
+.env
+.env.local
+.env.*.local
+
+# Local runtime data
 backend/var/
 data/normalized/
 data/private/
-.env.local
+
+# Terraform
 **/.terraform/
 *.tfstate
 *.tfstate.*
 *.tfplan
+
+# Playwright
 frontend/test-results/
 frontend/playwright-report/
+
+.DS_Store
