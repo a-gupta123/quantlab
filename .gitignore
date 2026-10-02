@@ -1,0 +1,17 @@
+.venv/
+__pycache__/
+*.py[cod]
+.env
+.python-version.local
+
+# QuantLab
+backend/var/
+data/normalized/
+data/private/
+.env.local
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+frontend/test-results/
+frontend/playwright-report/
