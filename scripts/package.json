@@ -1,0 +1,16 @@
+{
+  "name": "quantlab-scripts",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node --test \"test/*.test.mjs\"",
+    "demo:generate": "node generate-demo-dataset.mjs",
+    "demo:validate": "node validate-dataset.mjs ../data/demo/DEMO-SYNTH.csv --name DEMO-SYNTH --symbol DEMO --adjustment synthetic --synthetic --source \"Synthetic random data from scripts/generate-demo-dataset.mjs (seed 20240101). NOT real market prices.\" --out ../data/normalized"
+  },
+  "dependencies": {
+    "csv-parse": "7.0.3"
+  }
+}

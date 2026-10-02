@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import io
 import math
+import re
 from dataclasses import dataclass, field
 from datetime import date
 
@@ -21,6 +22,12 @@ MAX_ROWS = 20_000
 MAX_ISSUES = 50
 # A one-day move this large in an adjusted series usually means an unadjusted split.
 SUSPICIOUS_MOVE = 0.40
+# Bounds keep canonical number text identical between Python and JavaScript.
+MIN_PRICE = 0.0001
+MAX_PRICE = 1e9
+MAX_VOLUME = 1e15
+# Relative slack for floating-point noise in adjusted data (e.g. high 1e-14 below close).
+OHLC_TOLERANCE = 1e-9
 
 
 @dataclass
@@ -66,6 +73,24 @@ class Bars:
 
     def date_at(self, i: int) -> date:
         return pd.Timestamp(self.dates[i]).date()
+
+
+NUMBER_RE = re.compile(r"^[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$")
+
+
+def parse_number(text: str) -> float:
+    """Plain decimal numbers only (same grammar as validate-dataset.mjs).
+
+    Uses float(), which is correctly rounded like JavaScript's Number(). pandas'
+    to_numeric is not: it can land one unit-in-the-last-place away, which made
+    the two validators produce different bytes for real yfinance data.
+    """
+    text = text.strip()
+    return float(text) if NUMBER_RE.match(text) else math.nan
+
+
+def _js(x: float) -> str:
+    return str(int(x)) if float(x).is_integer() else repr(float(x))
 
 
 def _normalise_header(name: str) -> str:
@@ -120,24 +145,47 @@ def validate_frame(
 
     numeric: dict[str, pd.Series] = {}
     for col in ("open", "high", "low", "close", *(c for c in OPTIONAL_COLUMNS if c in df)):
-        values = pd.to_numeric(df[col].astype(str).str.strip().replace("", "nan"), errors="coerce")
+        values = df[col].astype(str).map(parse_number)
         numeric[col] = values
         arr = values.to_numpy(dtype=float)
         bad = ~np.isfinite(arr)
         if col == "volume":
-            bad |= arr < 0
-            label = "a finite, non-negative number"
+            present = df[col].astype(str).str.strip() != ""
+            bad = present.to_numpy() & (bad | (arr < 0) | (arr >= MAX_VOLUME))
+            label = "a finite, non-negative number below 1e15"
         else:
             bad |= arr <= 0
             label = "a finite, positive number"
         for i in np.flatnonzero(bad):
             report.error(int(i) + 1, col, f"'{df[col].iloc[i]}' must be {label}.")
+        if col != "volume":
+            with np.errstate(invalid="ignore"):
+                out_of_range = ~bad & ((arr < MIN_PRICE) | (arr > MAX_PRICE))
+            for i in np.flatnonzero(out_of_range):
+                report.error(
+                    int(i) + 1,
+                    col,
+                    f"{arr[i]} is outside the supported price range {MIN_PRICE} to {MAX_PRICE}.",
+                )
 
     if not report.ok:
         return None, report
 
     o, h, low, c = (numeric[k].to_numpy(dtype=float) for k in ("open", "high", "low", "close"))
-    inconsistent = (h < low) | (h < o) | (h < c) | (low > o) | (low > c)
+    top, bottom = np.maximum(o, c), np.minimum(o, c)
+    slack = OHLC_TOLERANCE * top
+    inconsistent = (h < low) | (h < top - slack) | (low > bottom + slack)
+    clamp = ~inconsistent & ((h < top) | (low > bottom))
+    for i in np.flatnonzero(clamp):
+        new_h, new_l = max(h[i], top[i]), min(low[i], bottom[i])
+        report.warn(
+            int(i) + 1,
+            None,
+            "Clamped high/low by a floating-point rounding difference "
+            f"(high {_js(h[i])} -> {_js(new_h)}, low {_js(low[i])} -> {_js(new_l)}).",
+        )
+    h = np.where(clamp, np.maximum(h, top), h)
+    low = np.where(clamp, np.minimum(low, bottom), low)
     for i in np.flatnonzero(inconsistent):
         report.error(
             int(i) + 1,

@@ -64,3 +64,29 @@ def test_large_move_is_a_warning_not_error():
     df, errs, report = messages(raw)
     assert errs == [] and df is not None
     assert any("unadjusted split" in w.message for w in report.warnings)
+
+
+def test_float_noise_in_high_is_clamped_with_warning():
+    raw = csv_bytes(["2024-01-02,108.44,108.84165954589842,107.62,108.84165954589844,1"])
+    df, errs, report = messages(raw)
+    assert errs == []
+    assert df["high"].iloc[0] == 108.84165954589844
+    assert any("Clamped" in w.message for w in report.warnings)
+
+
+@pytest.mark.parametrize("text", ["90.09069393923035", "90.24234750726089", "90.50430933501639"])
+def test_number_parsing_round_trips_like_javascript(text):
+    """Regression: pandas.to_numeric parsed these one ULP off, breaking hash parity."""
+    from quantlab.datasets import canonical_number
+    from quantlab.engine.data import parse_number
+
+    assert canonical_number(parse_number(text)) == text
+
+
+@pytest.mark.parametrize("text", ["0x10", "1,000", "inf", "NaN", "", "1e3e3"])
+def test_number_grammar_rejects_non_decimal_text(text):
+    import math
+
+    from quantlab.engine.data import parse_number
+
+    assert math.isnan(parse_number(text))

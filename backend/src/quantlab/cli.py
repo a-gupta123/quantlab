@@ -45,7 +45,10 @@ def import_manifest_cmd(path: str) -> int:
             )
     except DuplicateDatasetError as exc:
         print(f"already imported: dataset {exc.existing_id} ({exc.existing_label}); nothing to do")
-    except DatasetImportError as exc:
+    except (OSError, ValueError, KeyError) as exc:
+        if not isinstance(exc, DatasetImportError):
+            print(f"import failed: cannot read manifest {path}: {exc!r}", file=sys.stderr)
+            return 1
         print(f"import failed: {exc}", file=sys.stderr)
         if exc.report:
             for e in exc.report.errors:

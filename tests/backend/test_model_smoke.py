@@ -20,8 +20,10 @@ def test_finbert_classifies_clear_headlines():
     model.reset_for_tests(None)
     clf = model.get_classifier()
     pos, neg = clf.classify(
-        ["Operating profit rose sharply and the company raised guidance",
-         "Company profits fell sharply amid falling sales"]
+        [
+            "Operating profit rose sharply and the company raised guidance",
+            "Company profits fell sharply amid falling sales",
+        ]
     )
     assert max(pos, key=pos.get) == "positive"
     assert max(neg, key=neg.get) == "negative"
