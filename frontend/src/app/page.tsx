@@ -1,69 +1,96 @@
-import Image from "next/image";
+import Link from "next/link";
+import { AutoRefresh } from "@/components/auto-refresh";
+import { ErrorState, Metric, PageHeader } from "@/components/ui";
+import { apiTry } from "@/lib/api-server";
+import { num, pct } from "@/lib/format";
+import { datasetSchema, experimentSummarySchema, pageOf, statsSchema } from "@/lib/schemas";
+import { requireSession } from "@/lib/session";
+import { ExperimentTable } from "./experiment-table";
+import { Filters } from "./filters";
 
-export default function Home() {
+const PAGE_SIZE = 20;
+
+type SearchParams = Promise<Record<string, string | string[] | undefined>>;
+
+// Server Component: the initial list, stats, and dataset options are fetched on
+// the server with the service token. Filters/selection are Client Components.
+export default async function Dashboard({ searchParams }: { searchParams: SearchParams }) {
+  await requireSession();
+  const sp = await searchParams;
+  const one = (k: string) => (typeof sp[k] === "string" ? (sp[k] as string) : "");
+  const page = Math.max(1, Number(one("page")) || 1);
+  const params = new URLSearchParams({ limit: String(PAGE_SIZE), offset: String((page - 1) * PAGE_SIZE) });
+  for (const k of ["q", "status", "dataset_id"]) if (one(k)) params.set(k, one(k));
+  if (one("include_workflow") === "1") params.set("include_workflow", "true");
+
+  const [list, stats, datasets] = await Promise.all([
+    apiTry(`/api/experiments?${params}`, pageOf(experimentSummarySchema)),
+    apiTry("/api/experiments/stats", statsSchema),
+    apiTry("/api/datasets?limit=100", pageOf(datasetSchema)),
+  ]);
+
+  const active = (list.data?.items ?? []).some((e) => e.status === "queued" || e.status === "running");
+  const totalPages = list.data ? Math.max(1, Math.ceil(list.data.total / PAGE_SIZE)) : 1;
+  const pageHref = (p: number) => {
+    const next = new URLSearchParams(Object.entries(sp).filter(([, v]) => typeof v === "string") as [string, string][]);
+    next.set("page", String(p));
+    return `/?${next}`;
+  };
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
-    </div>
+    <>
+      <PageHeader title="Experiments">
+        <Link href="/experiments/new" className="btn-primary">
+          New experiment
+        </Link>
+      </PageHeader>
+
+      {stats.error ? (
+        <ErrorState title="Could not load summary" message={stats.error.message} />
+      ) : (
+        <dl className="mb-6 grid grid-cols-2 gap-3 md:grid-cols-5">
+          <Metric label="Saved runs" value={stats.data.total} />
+          <Metric label="Completed" value={stats.data.by_status.completed ?? 0} />
+          <Metric label="In progress" value={(stats.data.by_status.queued ?? 0) + (stats.data.by_status.running ?? 0)} />
+          <Metric label="Failed" value={stats.data.by_status.failed ?? 0} />
+          <Metric
+            label="Workers online"
+            value={stats.data.workers_online}
+            className={stats.data.workers_online ? "text-emerald-700" : "text-rose-700"}
+            hint={stats.data.workers_online ? undefined : "Start the worker to process runs"}
+          />
+        </dl>
+      )}
+      {stats.data?.best_sharpe && (
+        <p className="mb-4 text-sm text-slate-600">
+          Highest Sharpe among completed runs:{" "}
+          <Link className="text-sky-800 underline" href={`/experiments/${stats.data.best_sharpe.id}`}>
+            {stats.data.best_sharpe.name}
+          </Link>{" "}
+          (Sharpe {num(stats.data.best_sharpe.sharpe_ratio)}, total return {pct(stats.data.best_sharpe.total_return)}).
+          Ranking past runs this way is descriptive, not a selection procedure.
+        </p>
+      )}
+
+      <Filters datasets={datasets.data?.items ?? []} />
+      <AutoRefresh active={active} />
+
+      {list.error ? (
+        <ErrorState title="Could not load experiments" message={list.error.message} />
+      ) : (
+        <>
+          <ExperimentTable items={list.data.items} filtered={Boolean(one("q") || one("status") || one("dataset_id"))} />
+          {totalPages > 1 && (
+            <nav aria-label="Pagination" className="mt-4 flex items-center gap-3 text-sm">
+              {page > 1 && <Link className="btn-secondary" href={pageHref(page - 1)}>Previous</Link>}
+              <span>
+                Page {page} of {totalPages} ({list.data.total} runs)
+              </span>
+              {page < totalPages && <Link className="btn-secondary" href={pageHref(page + 1)}>Next</Link>}
+            </nav>
+          )}
+        </>
+      )}
+    </>
   );
 }
