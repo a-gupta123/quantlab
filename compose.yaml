@@ -1,0 +1,105 @@
+# Local full stack:  cp .env.example .env  (fill in values)  &&  docker compose up --build
+# Demo dataset:      docker compose run --rm demo-import
+# Only the frontend is published (http://localhost:3000); the API, worker and
+# database are reachable only on the internal Compose network.
+
+x-backend-env: &backend-env
+  DATABASE_URL: postgresql+psycopg://quantlab:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/quantlab
+  API_INTERNAL_TOKEN: ${API_INTERNAL_TOKEN:?set API_INTERNAL_TOKEN in .env}
+  STORAGE_BACKEND: local
+  LOCAL_STORAGE_DIR: /data/storage
+  LLM_EXPLANATIONS_ENABLED: ${LLM_EXPLANATIONS_ENABLED:-false}
+  OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+
+services:
+  db:
+    image: postgres:17.9-trixie
+    environment:
+      POSTGRES_DB: quantlab
+      POSTGRES_USER: quantlab
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U quantlab -d quantlab"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  # Runs once per `up`; api and worker wait for it to exit successfully, so
+  # schema changes never race between containers.
+  migrate:
+    build: { context: ./backend, target: api }
+    image: quantlab-api:local
+    command: ["quantlab", "migrate"]
+    environment: *backend-env
+    depends_on:
+      db: { condition: service_healthy }
+    restart: "no"
+
+  api:
+    image: quantlab-api:local
+    environment: *backend-env
+    volumes:
+      - storage:/data/storage
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+    restart: unless-stopped
+
+  worker:
+    build: { context: ./backend, target: worker }
+    image: quantlab-worker:local
+    environment:
+      <<: *backend-env
+      JOB_LEASE_SECONDS: "60"
+    volumes:
+      - storage:/data/storage
+      - hf-cache:/models
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+    stop_grace_period: 30s
+    restart: unless-stopped
+
+  frontend:
+    build: { context: ./frontend }
+    image: quantlab-frontend:local
+    environment:
+      API_BASE_URL: http://api:8000
+      API_INTERNAL_TOKEN: ${API_INTERNAL_TOKEN:?set API_INTERNAL_TOKEN in .env}
+      SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET in .env}
+      APP_PASSWORD: ${APP_PASSWORD:?set APP_PASSWORD in .env}
+      # Plain http on localhost; must be true (the default) behind HTTPS.
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+    ports:
+      - "127.0.0.1:${FRONTEND_PORT:-3000}:3000"
+    depends_on:
+      api: { condition: service_healthy }
+    restart: unless-stopped
+
+  # --- one-off tools (not started by `up`) ---------------------------------
+  demo-validate:
+    profiles: ["tools"]
+    image: node:24.7.0-trixie-slim
+    working_dir: /repo/scripts
+    command: ["sh", "-c", "npm ci --no-audit --no-fund --silent && npm run --silent demo:validate"]
+    volumes:
+      - ./scripts:/repo/scripts
+      - ./data:/repo/data
+
+  demo-import:
+    profiles: ["tools"]
+    image: quantlab-api:local
+    command: ["quantlab", "import-manifest", "/repo/data/normalized/DEMO-SYNTH.manifest.json"]
+    environment: *backend-env
+    volumes:
+      - storage:/data/storage
+      - ./data:/repo/data:ro
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      demo-validate: { condition: service_completed_successfully }
+
+volumes:
+  pgdata:
+  storage:
+  hf-cache:

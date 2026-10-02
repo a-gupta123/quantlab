@@ -21,9 +21,9 @@ ALEMBIC_INI = Path(
 
 
 def migrate() -> None:
+    from alembic import command
     from alembic.config import Config
 
-    from alembic import command
     from quantlab.workflow.runner import setup_checkpointer
 
     command.upgrade(Config(str(ALEMBIC_INI)), "head")

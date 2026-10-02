@@ -38,9 +38,8 @@ def database_url():
         conn.execute(text(f'CREATE DATABASE "{name}"'))
     url = make_url(admin).set(database=name).render_as_string(hide_password=False)
 
-    from alembic.config import Config
-
     from alembic import command
+    from alembic.config import Config
 
     cfg = Config(str(BACKEND_DIR / "alembic.ini"))
     cfg.attributes["database_url"] = url

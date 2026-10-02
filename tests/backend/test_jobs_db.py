@@ -202,3 +202,14 @@ def test_transient_failure_retries_then_fails(db_env):
     assert calls == [1, 2, 3]
     assert job_row(1).status == "failed"
     assert exp_row(exp_id).status == "failed"
+
+
+def test_healthcheck_tracks_this_host_and_clean_shutdown(db_env):
+    from quantlab.worker import healthcheck
+
+    assert healthcheck() == 1  # no worker has reported from this host yet
+    w = Worker("hc-worker")
+    w.report_alive()
+    assert healthcheck() == 0
+    w.deregister()
+    assert healthcheck() == 1

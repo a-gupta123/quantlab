@@ -175,20 +175,26 @@ class Worker:
                 time.sleep(5)
             if processed is None:
                 time.sleep(self.settings.worker_poll_seconds)
+        self.deregister()
         log.info("worker %s stopped", self.id)
+
+    def deregister(self) -> None:
+        """Remove this worker's liveness row on a clean shutdown. A crashed worker
+        keeps its row and simply goes stale, which is what recovery relies on."""
+        try:
+            with transaction() as s:
+                s.execute(text("DELETE FROM workers WHERE id = :id"), {"id": self.id})
+        except Exception:
+            log.warning("could not deregister worker %s", self.id, exc_info=True)
 
 
 def healthcheck(max_age_seconds: int = 60) -> int:
     """Exit 0 if this container's worker reported in recently (Docker/ECS health)."""
     worker_id = get_settings().worker_id
+    column = "id" if worker_id else "hostname"
+    sql = f"SELECT extract(epoch FROM now() - max(last_seen_at)) FROM workers WHERE {column} = :key"
     with get_engine().connect() as conn:
-        age = conn.execute(
-            text(
-                "SELECT extract(epoch FROM now() - max(last_seen_at)) FROM workers "
-                + ("WHERE id = :id" if worker_id else "")
-            ),
-            {"id": worker_id},
-        ).scalar()
+        age = conn.execute(text(sql), {"key": worker_id or socket.gethostname()}).scalar()
     return 0 if age is not None and age < max_age_seconds else 1
 
 
