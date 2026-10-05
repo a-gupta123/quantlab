@@ -15,7 +15,8 @@ from quantlab.datasets import (
     import_dataset,
 )
 from quantlab.engine.backtest import MAX_WINDOW
-from quantlab.models import Dataset
+from quantlab.engine.rules import RuleSpec
+from quantlab.models import Dataset, StrategyVersion
 from quantlab.storage import StorageError, get_storage
 
 router = APIRouter(prefix="/api/datasets", tags=["datasets"])
@@ -47,13 +48,31 @@ def get_dataset(dataset_id: int, session: SessionDep):
 
 @router.get("/{dataset_id}/warmup", response_model=schemas.WarmupOut)
 def warmup(
-    dataset_id: int, session: SessionDep, long_window: Annotated[int, Query(ge=2, le=MAX_WINDOW)]
+    dataset_id: int,
+    session: SessionDep,
+    long_window: Annotated[int | None, Query(ge=2, le=MAX_WINDOW)] = None,
+    strategy_version_id: Annotated[int | None, Query(gt=0)] = None,
 ):
+    if (long_window is None) == (strategy_version_id is None):
+        raise HTTPException(422, "Give exactly one of long_window or strategy_version_id.")
     with session.begin():
         if session.get(Dataset, dataset_id) is None:
             raise HTTPException(404, f"Dataset {dataset_id} not found.")
-        first = earliest_valid_start(session, dataset_id, long_window)
-    return schemas.WarmupOut(dataset_id=dataset_id, long_window=long_window, earliest_start=first)
+        if strategy_version_id is not None:
+            version = session.get(StrategyVersion, strategy_version_id)
+            if version is None:
+                raise HTTPException(404, f"Strategy version {strategy_version_id} not found.")
+            bars = RuleSpec.model_validate(version.spec).warmup_bars()
+        else:
+            bars = long_window
+        first = earliest_valid_start(session, dataset_id, bars)
+    return schemas.WarmupOut(
+        dataset_id=dataset_id,
+        long_window=long_window,
+        strategy_version_id=strategy_version_id,
+        warmup_bars=bars,
+        earliest_start=first,
+    )
 
 
 @router.post(

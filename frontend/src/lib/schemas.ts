@@ -37,8 +37,9 @@ export const experimentSummarySchema = z.object({
   dataset_id: num,
   dataset_name: z.string(),
   dataset_is_synthetic: z.boolean(),
-  short_window: num,
-  long_window: num,
+  short_window: optNum,
+  long_window: optNum,
+  strategy_label: z.string(),
   start_date: z.string(),
   end_date: z.string(),
   created_at: z.string(),
@@ -122,7 +123,7 @@ export const tradeSchema = z.object({
   seq: num,
   signal_date: z.string(),
   trade_date: z.string(),
-  side: z.enum(["buy", "sell"]),
+  side: z.enum(["buy", "sell", "short", "cover"]),
   open_price: num,
   exec_price: num,
   shares: num,
@@ -136,12 +137,28 @@ export type Trade = z.infer<typeof tradeSchema>;
 export const strategyConfigSchema = z.object({
   id: num,
   strategy: z.string(),
-  short_window: num,
-  long_window: num,
+  short_window: optNum,
+  long_window: optNum,
+  strategy_version_id: optNum.optional(),
   fee_bps: num,
   slippage_bps: num,
   allow_fractional: z.boolean(),
+  rules: z
+    .object({
+      strategy_id: num,
+      name: z.string(),
+      version: num,
+      fidelity: num,
+      rules_text: z.array(z.string()),
+    })
+    .nullable()
+    .optional(),
 });
+export type StrategyConfig = z.infer<typeof strategyConfigSchema>;
+
+export function strategyLabel(c: StrategyConfig): string {
+  return c.rules ? `${c.rules.name} (v${c.rules.version})` : `MA ${c.short_window}/${c.long_window}`;
+}
 
 export const experimentDetailSchema = z.object({
   id: num,
@@ -188,9 +205,73 @@ export const statsSchema = z.object({
 
 export const warmupSchema = z.object({
   dataset_id: num,
-  long_window: num,
+  long_window: optNum,
+  strategy_version_id: optNum.optional(),
+  warmup_bars: num,
   earliest_start: z.string().nullable(),
 });
+
+export const requirementSchema = z.object({
+  text: z.string(),
+  status: z.enum(["exact", "approximated", "unsupported"]),
+  weight: num,
+  note: z.string(),
+});
+export type Requirement = z.infer<typeof requirementSchema>;
+
+export const strategyVersionSchema = z.object({
+  id: num,
+  version: num,
+  spec: z.record(z.string(), z.unknown()),
+  rules_text: z.array(z.string()),
+  requirements: z.array(requirementSchema),
+  fidelity: num,
+  summary: z.string(),
+  assumptions: z.array(z.string()),
+  model: z.string(),
+  warmup_bars: num,
+  created_at: z.string(),
+});
+export type StrategyVersion = z.infer<typeof strategyVersionSchema>;
+
+export const strategyMessageSchema = z.object({
+  id: num,
+  role: z.enum(["user", "assistant"]),
+  content: z.string(),
+  outcome: z.string().nullable(),
+  version_id: optNum,
+  created_at: z.string(),
+});
+export type StrategyMessage = z.infer<typeof strategyMessageSchema>;
+
+export const strategyDetailSchema = z.object({
+  id: num,
+  name: z.string(),
+  created_at: z.string(),
+  updated_at: z.string(),
+  versions: z.array(strategyVersionSchema),
+  messages: z.array(strategyMessageSchema),
+});
+export type StrategyDetail = z.infer<typeof strategyDetailSchema>;
+
+export const strategySummarySchema = z.object({
+  id: num,
+  name: z.string(),
+  updated_at: z.string(),
+  latest_version_id: num,
+  latest_version: num,
+  fidelity: num,
+  direction: z.string(),
+});
+export type StrategySummary = z.infer<typeof strategySummarySchema>;
+
+export const strategyChatSchema = z.object({
+  outcome: z.enum(["built", "invalid"]),
+  reply: z.string(),
+  strategy: strategyDetailSchema.nullable(),
+});
+
+export const strategyStatusSchema = z.object({ available: z.boolean(), model: z.string() });
 
 export const variantSchema = z.object({
   key: z.string(),

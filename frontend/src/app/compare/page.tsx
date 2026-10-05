@@ -3,7 +3,7 @@ import { DrawdownChart, EquityChart } from "@/components/charts";
 import { ErrorState, PageHeader, SyntheticBadge } from "@/components/ui";
 import { apiTry } from "@/lib/api-server";
 import { num, pct, usd } from "@/lib/format";
-import { compareSchema, experimentSummarySchema, type Metrics, pageOf } from "@/lib/schemas";
+import { compareSchema, experimentSummarySchema, type Metrics, pageOf, strategyLabel } from "@/lib/schemas";
 import { requireSession } from "@/lib/session";
 import { ExperimentTable } from "../experiment-table";
 
@@ -98,7 +98,7 @@ export default async function ComparePage({ searchParams }: PageProps<"/compare"
               {runs.map((e) => (
                 <th key={e.id} scope="col" className="num">
                   <Link href={`/experiments/${e.id}`} className="text-sky-800 normal-case underline">{e.name}</Link>
-                  <div className="font-normal normal-case">MA {e.strategy_config.short_window}/{e.strategy_config.long_window}</div>
+                  <div className="font-normal normal-case">{strategyLabel(e.strategy_config)}</div>
                 </th>
               ))}
               <th scope="col" className="num">Buy &amp; hold</th>

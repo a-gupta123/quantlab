@@ -35,7 +35,7 @@ function RunRow({ e, selected }: { e: ExperimentSummary; selected?: boolean }) {
   );
 }
 
-function RunTable({ rows, selectedWindows }: { rows: ExperimentSummary[]; selectedWindows?: [number, number] }) {
+function RunTable({ rows, selectedWindows }: { rows: ExperimentSummary[]; selectedWindows?: [number | null, number | null] }) {
   return (
     <div className="overflow-x-auto">
       <table className="table">

@@ -14,8 +14,9 @@ from quantlab.config import get_settings
 from quantlab.datasets import earliest_valid_start, load_bars
 from quantlab.db import transaction
 from quantlab.engine.backtest import MIN_EVAL_DAYS, BacktestInputError, StrategyParams
+from quantlab.engine.rules import RuleSpec
 from quantlab.engine.runner import ExperimentSpec, evaluate
-from quantlab.models import Dataset, Experiment, PriceBar, StrategyConfig
+from quantlab.models import Dataset, Experiment, PriceBar, StrategyConfig, StrategyVersion
 from quantlab.results import has_result, save_result, write_artifact
 from quantlab.storage import get_storage
 
@@ -35,8 +36,8 @@ class ExperimentRequest:
     start_date: date
     end_date: date
     initial_capital: float
-    short_window: int
-    long_window: int
+    short_window: int | None
+    long_window: int | None
     fee_bps: float
     slippage_bps: float
     allow_fractional: bool = True
@@ -45,20 +46,23 @@ class ExperimentRequest:
     bootstrap_block_length: int = 20
     bootstrap_resamples: int = 2000
     confidence_level: float = 0.95
+    strategy_version_id: int | None = None
 
 
 def get_or_create_strategy_config(
     session: Session,
-    short: int,
-    long: int,
+    short: int | None,
+    long: int | None,
     fee_bps: float,
     slippage_bps: float,
     allow_fractional: bool,
+    strategy_version_id: int | None = None,
 ) -> StrategyConfig:
     values = dict(
-        strategy="ma_crossover",
+        strategy="rules" if strategy_version_id else "ma_crossover",
         short_window=short,
         long_window=long,
+        strategy_version_id=strategy_version_id,
         fee_bps=fee_bps,
         slippage_bps=slippage_bps,
         allow_fractional=allow_fractional,
@@ -68,8 +72,36 @@ def get_or_create_strategy_config(
     return session.scalars(select(StrategyConfig).filter_by(**values)).one()
 
 
+def rule_spec(version: StrategyVersion) -> RuleSpec:
+    return RuleSpec.model_validate(version.spec)
+
+
+def strategy_params(req: ExperimentRequest, rules: RuleSpec | None) -> StrategyParams:
+    return StrategyParams(
+        req.short_window,
+        req.long_window,
+        req.initial_capital,
+        req.fee_bps,
+        req.slippage_bps,
+        req.allow_fractional,
+        rules=rules,
+    )
+
+
+def warmup_label(params: StrategyParams) -> str:
+    if params.rules:
+        return "this strategy's indicators"
+    return f"a {params.long_window}-day moving average"
+
+
 def check_range(
-    session: Session, dataset: Dataset, start: date, end: date, long_window: int, label: str = ""
+    session: Session,
+    dataset: Dataset,
+    start: date,
+    end: date,
+    warmup: int,
+    label: str = "",
+    what: str | None = None,
 ) -> None:
     """Pre-flight checks so users get a clear 422 instead of a failed job."""
     prefix = f"{label}: " if label else ""
@@ -80,16 +112,17 @@ def check_range(
             f"{prefix}dates must fall within the dataset range "
             f"{dataset.start_date} to {dataset.end_date}."
         )
-    first_valid = earliest_valid_start(session, dataset.id, long_window)
+    what = what or f"a {warmup}-day moving average"
+    first_valid = earliest_valid_start(session, dataset.id, warmup)
     if first_valid is None:
         raise InvalidRequest(
-            f"{prefix}dataset has only {dataset.row_count} bars; a {long_window}-day "
-            "average cannot be warmed up."
+            f"{prefix}dataset has only {dataset.row_count} bars; {what} needs {warmup} "
+            "bars of warm-up."
         )
     if start < first_valid:
         raise InvalidRequest(
-            f"{prefix}a {long_window}-day moving average needs {long_window} trading days "
-            f"before the start date. Earliest valid start is {first_valid}."
+            f"{prefix}{what} needs {warmup} trading days before the start date. "
+            f"Earliest valid start is {first_valid}."
         )
     n_days = session.scalar(
         select(func.count()).where(
@@ -115,18 +148,25 @@ def create_experiment(
     dataset = session.get(Dataset, req.dataset_id)
     if dataset is None:
         raise NotFound(f"Dataset {req.dataset_id} not found.")
+    rules = None
+    if req.strategy_version_id is not None:
+        version = session.get(StrategyVersion, req.strategy_version_id)
+        if version is None:
+            raise NotFound(f"Strategy version {req.strategy_version_id} not found.")
+        rules = rule_spec(version)
+    params = strategy_params(req, rules)
     try:
-        StrategyParams(
-            req.short_window,
-            req.long_window,
-            req.initial_capital,
-            req.fee_bps,
-            req.slippage_bps,
-            req.allow_fractional,
-        ).validate()
+        params.validate()
     except BacktestInputError as exc:
         raise InvalidRequest(str(exc)) from exc
-    check_range(session, dataset, req.start_date, req.end_date, req.long_window)
+    check_range(
+        session,
+        dataset,
+        req.start_date,
+        req.end_date,
+        params.warmup_bars(),
+        what=warmup_label(params),
+    )
     cfg = get_or_create_strategy_config(
         session,
         req.short_window,
@@ -134,6 +174,7 @@ def create_experiment(
         req.fee_bps,
         req.slippage_bps,
         req.allow_fractional,
+        req.strategy_version_id,
     )
     exp = Experiment(
         name=req.name,
@@ -179,11 +220,13 @@ def request_from_experiment(exp: Experiment, name: str | None = None) -> Experim
         bootstrap_block_length=exp.bootstrap_block_length,
         bootstrap_resamples=exp.bootstrap_resamples,
         confidence_level=exp.confidence_level,
+        strategy_version_id=cfg.strategy_version_id,
     )
 
 
 def spec_for(exp: Experiment) -> ExperimentSpec:
     cfg = exp.strategy_config
+    rules = rule_spec(cfg.strategy_version) if cfg.strategy_version_id else None
     return ExperimentSpec(
         params=StrategyParams(
             cfg.short_window,
@@ -192,6 +235,7 @@ def spec_for(exp: Experiment) -> ExperimentSpec:
             cfg.fee_bps,
             cfg.slippage_bps,
             cfg.allow_fractional,
+            rules=rules,
         ),
         start=exp.start_date,
         end=exp.end_date,
@@ -212,7 +256,7 @@ def compute_experiment(experiment_id: int) -> tuple[Experiment, dict]:
         dataset = s.get(Dataset, exp.dataset_id)
         if dataset.content_sha256 != exp.dataset_sha256:
             raise BacktestInputError("Dataset content changed since the experiment was created.")
-        _ = exp.strategy_config  # load before the session closes
+        _ = exp.strategy_config.strategy_version  # load before the session closes
         bars = load_bars(s, exp.dataset_id, exp.end_date)
     return exp, evaluate(bars, spec_for(exp))
 

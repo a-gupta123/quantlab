@@ -101,10 +101,24 @@ class StrategyConfig(Base):
             "allow_fractional",
             name="uq_strategy_configs_params",
         ),
-        CheckConstraint("strategy = 'ma_crossover'", name="ck_strategy_configs_strategy"),
         CheckConstraint(
-            "short_window >= 1 AND short_window < long_window AND long_window <= 400",
-            name="ck_strategy_configs_windows",
+            "strategy IN ('ma_crossover', 'rules')", name="ck_strategy_configs_strategy"
+        ),
+        CheckConstraint(
+            "(strategy = 'ma_crossover' AND strategy_version_id IS NULL AND short_window >= 1 "
+            "AND short_window < long_window AND long_window <= 400) OR "
+            "(strategy = 'rules' AND strategy_version_id IS NOT NULL AND short_window IS NULL "
+            "AND long_window IS NULL)",
+            name="ck_strategy_configs_kind",
+        ),
+        Index(
+            "uq_strategy_configs_rules",
+            "strategy_version_id",
+            "fee_bps",
+            "slippage_bps",
+            "allow_fractional",
+            unique=True,
+            postgresql_where=text("strategy = 'rules'"),
         ),
         CheckConstraint("fee_bps >= 0 AND fee_bps <= 500", name="ck_strategy_configs_fee"),
         CheckConstraint(
@@ -114,11 +128,86 @@ class StrategyConfig(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     strategy: Mapped[str] = mapped_column(String(32), nullable=False, default="ma_crossover")
-    short_window: Mapped[int] = mapped_column(Integer, nullable=False)
-    long_window: Mapped[int] = mapped_column(Integer, nullable=False)
+    short_window: Mapped[int | None] = mapped_column(Integer)
+    long_window: Mapped[int | None] = mapped_column(Integer)
+    strategy_version_id: Mapped[int | None] = mapped_column(
+        ForeignKey("strategy_versions.id", ondelete="RESTRICT")
+    )
     fee_bps: Mapped[float] = mapped_column(Float, nullable=False)
     slippage_bps: Mapped[float] = mapped_column(Float, nullable=False)
     allow_fractional: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    created_at: Mapped[datetime] = _created()
+
+    strategy_version: Mapped["StrategyVersion | None"] = relationship()
+
+
+class CustomStrategy(Base):
+    """A conversation with the strategy chatbot and the versions it produced."""
+
+    __tablename__ = "custom_strategies"
+    __table_args__ = (Index("ix_custom_strategies_updated_at", "updated_at"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    created_at: Mapped[datetime] = _created()
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+    versions: Mapped[list["StrategyVersion"]] = relationship(
+        back_populates="strategy", order_by="StrategyVersion.version"
+    )
+    messages: Mapped[list["StrategyMessage"]] = relationship(order_by="StrategyMessage.id")
+
+
+class StrategyVersion(Base):
+    """An immutable, validated RuleSpec. Experiments pin a version, never a strategy."""
+
+    __tablename__ = "strategy_versions"
+    __table_args__ = (
+        UniqueConstraint("strategy_id", "version", name="uq_strategy_versions_strategy_version"),
+        CheckConstraint("version >= 1", name="ck_strategy_versions_version"),
+        CheckConstraint("fidelity >= 0 AND fidelity <= 100", name="ck_strategy_versions_fidelity"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    strategy_id: Mapped[int] = mapped_column(
+        ForeignKey("custom_strategies.id", ondelete="CASCADE"), nullable=False
+    )
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    spec: Mapped[dict[str, Any]] = mapped_column(nullable=False)
+    requirements: Mapped[list[Any]] = mapped_column(nullable=False)
+    fidelity: Mapped[float] = mapped_column(Float, nullable=False)
+    summary: Mapped[str] = mapped_column(Text, nullable=False)
+    assumptions: Mapped[list[Any]] = mapped_column(nullable=False)
+    model: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = _created()
+
+    strategy: Mapped[CustomStrategy] = relationship(back_populates="versions")
+
+
+class StrategyMessage(Base):
+    __tablename__ = "strategy_messages"
+    __table_args__ = (
+        CheckConstraint("role IN ('user', 'assistant')", name="ck_strategy_messages_role"),
+        CheckConstraint(
+            "outcome IS NULL OR outcome IN ('built', 'invalid', 'error')",
+            name="ck_strategy_messages_outcome",
+        ),
+        CheckConstraint("char_length(content) BETWEEN 1 AND 8000", name="ck_strategy_messages_len"),
+        Index("ix_strategy_messages_strategy_id", "strategy_id", "id"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    strategy_id: Mapped[int] = mapped_column(
+        ForeignKey("custom_strategies.id", ondelete="CASCADE"), nullable=False
+    )
+    role: Mapped[str] = mapped_column(String(16), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    outcome: Mapped[str | None] = mapped_column(String(16))
+    version_id: Mapped[int | None] = mapped_column(
+        ForeignKey("strategy_versions.id", ondelete="SET NULL")
+    )
     created_at: Mapped[datetime] = _created()
 
 
@@ -272,7 +361,7 @@ class Trade(Base):
     __tablename__ = "trades"
     __table_args__ = (
         UniqueConstraint("experiment_id", "seq", name="uq_trades_experiment_seq"),
-        CheckConstraint("side IN ('buy', 'sell')", name="ck_trades_side"),
+        CheckConstraint("side IN ('buy', 'sell', 'short', 'cover')", name="ck_trades_side"),
         CheckConstraint("shares > 0 AND exec_price > 0", name="ck_trades_positive"),
         CheckConstraint("signal_date < trade_date", name="ck_trades_no_lookahead"),
     )
@@ -284,7 +373,7 @@ class Trade(Base):
     seq: Mapped[int] = mapped_column(Integer, nullable=False)
     signal_date: Mapped[date] = mapped_column(Date, nullable=False)
     trade_date: Mapped[date] = mapped_column(Date, nullable=False)
-    side: Mapped[str] = mapped_column(String(4), nullable=False)
+    side: Mapped[str] = mapped_column(String(8), nullable=False)
     open_price: Mapped[float] = mapped_column(Float, nullable=False)
     exec_price: Mapped[float] = mapped_column(Float, nullable=False)
     shares: Mapped[float] = mapped_column(Float, nullable=False)

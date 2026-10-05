@@ -83,7 +83,7 @@ export function ExperimentTable({ items, filtered }: { items: ExperimentSummary[
               <td>
                 {e.dataset_name} {e.dataset_is_synthetic && <SyntheticBadge />}
               </td>
-              <td className="font-mono">{e.short_window}/{e.long_window}</td>
+              <td className={e.short_window === null ? "" : "font-mono"}>{e.strategy_label}</td>
               <td className="text-xs">{e.start_date} → {e.end_date}</td>
               <td className={`num ${signClass(e.total_return)}`}>{pct(e.total_return)}</td>
               <td className={`num ${signClass(e.benchmark_total_return)}`}>{pct(e.benchmark_total_return)}</td>

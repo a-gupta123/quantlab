@@ -74,7 +74,7 @@ def compute_metrics(
     dd = drawdown_series(equity, initial_capital)
     exposure = None
     if position is not None:
-        exposure = float(np.mean(position > 0))
+        exposure = float(np.mean(position != 0))  # long or short
 
     return {
         "final_equity": final,

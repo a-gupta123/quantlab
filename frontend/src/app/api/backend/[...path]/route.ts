@@ -5,7 +5,7 @@ import type { NextRequest } from "next/server";
 import { hasSession } from "@/lib/session";
 import { serverConfig } from "@/lib/server-config";
 
-const ALLOWED_PREFIXES = ["datasets", "experiments", "workflows", "sentiment", "system"];
+const ALLOWED_PREFIXES = ["datasets", "experiments", "workflows", "sentiment", "strategies", "system"];
 const MAX_BODY_BYTES = 6 * 1024 * 1024;
 
 function json(status: number, detail: string) {

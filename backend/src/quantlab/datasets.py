@@ -183,7 +183,14 @@ def import_manifest(session: Session, storage: Storage, manifest_path: Path) -> 
 
 
 def load_bars(session: Session, dataset_id: int, end: date | None = None):
-    q = select(PriceBar.trade_date, PriceBar.open, PriceBar.high, PriceBar.low, PriceBar.close)
+    q = select(
+        PriceBar.trade_date,
+        PriceBar.open,
+        PriceBar.high,
+        PriceBar.low,
+        PriceBar.close,
+        PriceBar.volume,
+    )
     q = q.where(PriceBar.dataset_id == dataset_id)
     if end is not None:
         q = q.where(PriceBar.trade_date <= end)

@@ -67,6 +67,11 @@ class Bars:
     high: np.ndarray
     low: np.ndarray
     close: np.ndarray
+    volume: np.ndarray | None = None  # NaN where the source had no volume
+
+    def __post_init__(self):
+        if self.volume is None:
+            object.__setattr__(self, "volume", np.full(len(self.dates), np.nan))
 
     def __len__(self) -> int:
         return len(self.dates)
@@ -243,7 +248,7 @@ def validate_frame(
 
 
 def bars_from_rows(rows: list[tuple]) -> Bars:
-    """Build Bars from DB rows of (trade_date, open, high, low, close)."""
+    """Build Bars from DB rows of (trade_date, open, high, low, close[, volume])."""
     if not rows:
         raise ValueError("Dataset has no price bars.")
     dates = np.array([r[0] for r in rows], dtype="datetime64[D]")
@@ -252,7 +257,10 @@ def bars_from_rows(rows: list[tuple]) -> Bars:
         raise ValueError("Price bars are not strictly increasing by date.")
     if not np.all(np.isfinite(cols)) or np.any(cols <= 0):
         raise ValueError("Price bars contain non-finite or non-positive prices.")
-    return Bars(dates, cols[:, 0], cols[:, 1], cols[:, 2], cols[:, 3])
+    volume = None
+    if len(rows[0]) > 5:
+        volume = np.array([np.nan if r[5] is None else r[5] for r in rows], dtype=float)
+    return Bars(dates, cols[:, 0], cols[:, 1], cols[:, 2], cols[:, 3], volume)
 
 
 def to_iso(d: np.datetime64) -> str:

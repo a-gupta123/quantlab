@@ -6,7 +6,7 @@ import { ErrorState, Metric, PageHeader, StatusBadge, SyntheticBadge } from "@/c
 import { describeRun } from "@/lib/analysis";
 import { apiTry } from "@/lib/api-server";
 import { dateTime, num, pct, signClass, usd } from "@/lib/format";
-import { type ConfidenceInterval, type ExperimentDetail, experimentDetailSchema, isTerminal, type Metrics } from "@/lib/schemas";
+import { type ConfidenceInterval, type ExperimentDetail, experimentDetailSchema, isTerminal, type Metrics, strategyLabel } from "@/lib/schemas";
 import { requireSession } from "@/lib/session";
 import { ExperimentActions } from "./actions";
 import { TradesTable } from "./trades-table";
@@ -29,8 +29,13 @@ export default async function ExperimentPage({ params }: PageProps<"/experiments
       <div className="mb-6 flex flex-wrap items-center gap-3 text-sm text-slate-600">
         <StatusBadge status={e.status} />
         <span>
-          MA {cfg.short_window}/{cfg.long_window} on {e.dataset.name} v{e.dataset.version} ({e.dataset.symbol})
+          {strategyLabel(cfg)} on {e.dataset.name} v{e.dataset.version} ({e.dataset.symbol})
         </span>
+        {cfg.rules && (
+          <Link href={`/strategies/${cfg.rules.strategy_id}`} className="text-sky-800 underline">
+            Open in strategy builder ({cfg.rules.fidelity.toFixed(0)}% match)
+          </Link>
+        )}
         {e.dataset.is_synthetic && <SyntheticBadge />}
         {e.workflow_run_id && (
           <Link href={`/workflows/${e.workflow_run_id}`} className="text-sky-800 underline">
@@ -113,7 +118,7 @@ function Results({ e }: { e: ExperimentDetail }) {
           title={`Equity, ${r.eval_start} to ${r.eval_end} (marked at each close)`}
           dates={curve.dates}
           series={[
-            { key: "strategy", label: `MA ${e.strategy_config.short_window}/${e.strategy_config.long_window}`, values: curve.strategy },
+            { key: "strategy", label: strategyLabel(e.strategy_config), values: curve.strategy },
             { key: "benchmark", label: "Buy & hold", values: curve.benchmark, dashed: true },
           ]}
         />
@@ -198,7 +203,7 @@ function MetricsTable({ s, b }: { s: Metrics; b: Metrics }) {
     ["Sharpe ratio", (m) => num(m.sharpe_ratio)],
     ["Max drawdown", (m) => pct(m.max_drawdown)],
     ["Mean daily return", (m) => pct(m.mean_daily_return, 4)],
-    ["Exposure (days invested)", (m) => pct(m.exposure, 1)],
+    ["Exposure (days in a position)", (m) => pct(m.exposure, 1)],
     ["Trades", (m) => String(m.n_trades)],
     ["Fees paid", (m) => usd(m.total_fees)],
     ["Slippage cost", (m) => usd(m.total_slippage)],
@@ -224,7 +229,9 @@ function Config({ e }: { e: ExperimentDetail }) {
     ["Engine version", e.engine_version],
     ["Requested period", `${e.start_date} to ${e.end_date}`],
     ["Initial capital", usd(e.initial_capital)],
-    ["Windows", `${c.short_window} / ${c.long_window} trading days`],
+    c.rules
+      ? ["Rules", c.rules.rules_text.join(" · ")]
+      : ["Windows", `${c.short_window} / ${c.long_window} trading days`],
     ["Fee / slippage", `${c.fee_bps} bps / ${c.slippage_bps} bps`],
     ["Fractional shares", c.allow_fractional ? "Allowed" : "Whole shares only (leftover cash stays uninvested)"],
     ["Risk-free rate (annual)", pct(e.risk_free_rate)],

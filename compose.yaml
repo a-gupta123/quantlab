@@ -10,6 +10,7 @@ x-backend-env: &backend-env
   LOCAL_STORAGE_DIR: /data/storage
   LLM_EXPLANATIONS_ENABLED: ${LLM_EXPLANATIONS_ENABLED:-false}
   OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+  OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
 
 services:
   db:

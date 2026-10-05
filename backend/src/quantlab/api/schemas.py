@@ -47,7 +47,9 @@ class DatasetImportOut(BaseModel):
 
 class WarmupOut(BaseModel):
     dataset_id: int
-    long_window: int
+    long_window: int | None
+    strategy_version_id: int | None = None
+    warmup_bars: int
     earliest_start: date | None
 
 
@@ -62,8 +64,10 @@ class ExperimentCreate(BaseModel):
     start_date: date
     end_date: date
     initial_capital: float = Field(ge=100, le=1_000_000_000)
-    short_window: int = Field(ge=1, le=MAX_WINDOW - 1)
-    long_window: int = Field(ge=2, le=MAX_WINDOW)
+    # Either both MA windows, or a chatbot-built strategy version.
+    short_window: int | None = Field(default=None, ge=1, le=MAX_WINDOW - 1)
+    long_window: int | None = Field(default=None, ge=2, le=MAX_WINDOW)
+    strategy_version_id: int | None = Field(default=None, gt=0)
     fee_bps: float = Field(ge=0, le=500)
     slippage_bps: float = Field(ge=0, le=500)
     allow_fractional: bool = True
@@ -82,21 +86,37 @@ class ExperimentCreate(BaseModel):
 
     @model_validator(mode="after")
     def check_relations(self):
-        if self.short_window >= self.long_window:
+        windows = (self.short_window, self.long_window)
+        if self.strategy_version_id is not None:
+            if windows != (None, None):
+                raise ValueError("Give either strategy_version_id or MA windows, not both.")
+        elif None in windows:
+            raise ValueError("short_window and long_window are required for the MA crossover.")
+        elif self.short_window >= self.long_window:
             raise ValueError("short_window must be smaller than long_window.")
         if self.start_date >= self.end_date:
             raise ValueError("start_date must be before end_date.")
         return self
 
 
+class RulesRef(BaseModel):
+    strategy_id: int
+    name: str
+    version: int
+    fidelity: float
+    rules_text: list[str]
+
+
 class StrategyConfigOut(ORM):
     id: int
     strategy: str
-    short_window: int
-    long_window: int
+    short_window: int | None
+    long_window: int | None
+    strategy_version_id: int | None = None
     fee_bps: float
     slippage_bps: float
     allow_fractional: bool
+    rules: RulesRef | None = None
 
 
 class JobOut(ORM):
@@ -118,8 +138,9 @@ class ExperimentSummary(BaseModel):
     dataset_id: int
     dataset_name: str
     dataset_is_synthetic: bool
-    short_window: int
-    long_window: int
+    short_window: int | None
+    long_window: int | None
+    strategy_label: str
     start_date: date
     end_date: date
     created_at: datetime
@@ -282,6 +303,83 @@ class VariantOut(BaseModel):
     label: str
     short_window: int
     long_window: int
+
+
+# ----------------------------------------------------------------- strategies
+
+
+class StrategyChatIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    message: str = Field(min_length=1, max_length=2000)
+
+    @field_validator("message")
+    @classmethod
+    def not_blank(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("Message cannot be blank.")
+        return v
+
+
+class RequirementOut(BaseModel):
+    text: str
+    status: Literal["exact", "approximated", "unsupported"]
+    weight: int
+    note: str
+
+
+class StrategyVersionOut(BaseModel):
+    id: int
+    version: int
+    spec: dict[str, Any]
+    rules_text: list[str]
+    requirements: list[RequirementOut]
+    fidelity: float
+    summary: str
+    assumptions: list[str]
+    model: str
+    warmup_bars: int
+    created_at: datetime
+
+
+class StrategyMessageOut(ORM):
+    id: int
+    role: Literal["user", "assistant"]
+    content: str
+    outcome: str | None
+    version_id: int | None
+    created_at: datetime
+
+
+class StrategySummary(BaseModel):
+    id: int
+    name: str
+    updated_at: datetime
+    latest_version_id: int
+    latest_version: int
+    fidelity: float
+    direction: str
+
+
+class StrategyDetail(BaseModel):
+    id: int
+    name: str
+    created_at: datetime
+    updated_at: datetime
+    versions: list[StrategyVersionOut]
+    messages: list[StrategyMessageOut]
+
+
+class StrategyChatOut(BaseModel):
+    outcome: Literal["built", "invalid"]
+    reply: str
+    strategy: StrategyDetail | None
+
+
+class StrategyStatusOut(BaseModel):
+    available: bool
+    model: str
 
 
 # ------------------------------------------------------------------ sentiment

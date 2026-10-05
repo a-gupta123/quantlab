@@ -6,12 +6,16 @@ from sqlalchemy import Select, select
 from sqlalchemy.orm import Session
 
 from quantlab.api import schemas
+from quantlab.engine.rules import RuleSpec, describe
 from quantlab.models import (
+    CustomStrategy,
     Dataset,
     Experiment,
     ExperimentResult,
     Job,
     StrategyConfig,
+    StrategyMessage,
+    StrategyVersion,
     Trade,
 )
 
@@ -30,6 +34,8 @@ def summary_query() -> Select:
             Dataset.is_synthetic.label("dataset_is_synthetic"),
             StrategyConfig.short_window,
             StrategyConfig.long_window,
+            CustomStrategy.name.label("rules_name"),
+            StrategyVersion.version.label("rules_version"),
             Experiment.start_date,
             Experiment.end_date,
             Experiment.created_at,
@@ -42,12 +48,25 @@ def summary_query() -> Select:
         )
         .join(Dataset, Dataset.id == Experiment.dataset_id)
         .join(StrategyConfig, StrategyConfig.id == Experiment.strategy_config_id)
+        .outerjoin(StrategyVersion, StrategyVersion.id == StrategyConfig.strategy_version_id)
+        .outerjoin(CustomStrategy, CustomStrategy.id == StrategyVersion.strategy_id)
         .outerjoin(ExperimentResult, ExperimentResult.experiment_id == Experiment.id)
     )
 
 
+def strategy_label(short: int | None, long: int | None, name: str | None, version: int | None):
+    if name is not None:
+        return f"{name} (v{version})"
+    return f"MA {short}/{long}"
+
+
 def to_summary(row) -> schemas.ExperimentSummary:
-    return schemas.ExperimentSummary.model_validate(dict(row._mapping))
+    data = dict(row._mapping)
+    name, version = data.pop("rules_name"), data.pop("rules_version")
+    data["strategy_label"] = strategy_label(
+        data["short_window"], data["long_window"], name, version
+    )
+    return schemas.ExperimentSummary.model_validate(data)
 
 
 def latest_job(session: Session, **target) -> Job | None:
@@ -55,6 +74,20 @@ def latest_job(session: Session, **target) -> Job | None:
     return session.scalars(
         select(Job).where(getattr(Job, col) == value).order_by(Job.id.desc()).limit(1)
     ).first()
+
+
+def strategy_config_out(cfg: StrategyConfig) -> schemas.StrategyConfigOut:
+    out = schemas.StrategyConfigOut.model_validate(cfg)
+    v = cfg.strategy_version
+    if v is not None:
+        out.rules = schemas.RulesRef(
+            strategy_id=v.strategy_id,
+            name=v.strategy.name,
+            version=v.version,
+            fidelity=v.fidelity,
+            rules_text=describe(RuleSpec.model_validate(v.spec)),
+        )
+    return out
 
 
 def experiment_detail(session: Session, exp: Experiment) -> schemas.ExperimentDetail:
@@ -72,7 +105,7 @@ def experiment_detail(session: Session, exp: Experiment) -> schemas.ExperimentDe
         workflow_run_id=exp.workflow_run_id,
         rerun_of_id=exp.rerun_of_id,
         dataset=schemas.DatasetOut.model_validate(exp.dataset),
-        strategy_config=schemas.StrategyConfigOut.model_validate(exp.strategy_config),
+        strategy_config=strategy_config_out(exp.strategy_config),
         dataset_sha256=exp.dataset_sha256,
         engine_version=exp.engine_version,
         seed=exp.seed,
@@ -89,4 +122,45 @@ def experiment_detail(session: Session, exp: Experiment) -> schemas.ExperimentDe
         job=schemas.JobOut.model_validate(job) if job else None,
         result=schemas.ResultOut.model_validate(result) if result else None,
         trades=[schemas.TradeOut.model_validate(t) for t in trades],
+    )
+
+
+def version_out(v: StrategyVersion) -> schemas.StrategyVersionOut:
+    spec = RuleSpec.model_validate(v.spec)
+    return schemas.StrategyVersionOut(
+        id=v.id,
+        version=v.version,
+        spec=v.spec,
+        rules_text=describe(spec),
+        requirements=v.requirements,
+        fidelity=v.fidelity,
+        summary=v.summary,
+        assumptions=v.assumptions,
+        model=v.model,
+        warmup_bars=spec.warmup_bars(),
+        created_at=v.created_at,
+    )
+
+
+def strategy_detail(session: Session, strategy_id: int) -> schemas.StrategyDetail | None:
+    strat = session.get(CustomStrategy, strategy_id)
+    if strat is None:
+        return None
+    versions = session.scalars(
+        select(StrategyVersion)
+        .where(StrategyVersion.strategy_id == strategy_id)
+        .order_by(StrategyVersion.version)
+    ).all()
+    messages = session.scalars(
+        select(StrategyMessage)
+        .where(StrategyMessage.strategy_id == strategy_id)
+        .order_by(StrategyMessage.id)
+    ).all()
+    return schemas.StrategyDetail(
+        id=strat.id,
+        name=strat.name,
+        created_at=strat.created_at,
+        updated_at=strat.updated_at,
+        versions=[version_out(v) for v in versions],
+        messages=[schemas.StrategyMessageOut.model_validate(m) for m in messages],
     )

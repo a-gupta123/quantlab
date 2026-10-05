@@ -40,7 +40,7 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
                 <td>{t.seq}</td>
                 <td>{t.signal_date}</td>
                 <td>{t.trade_date}</td>
-                <td className={t.side === "buy" ? "text-emerald-700" : "text-rose-700"}>{t.side}</td>
+                <td className={t.side === "buy" || t.side === "cover" ? "text-emerald-700" : "text-rose-700"}>{t.side}</td>
                 <td className="num">{num(t.open_price, 4)}</td>
                 <td className="num">{num(t.exec_price, 4)}</td>
                 <td className="num">{num(t.shares, 4)}</td>
