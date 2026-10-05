@@ -1,7 +1,8 @@
 from functools import lru_cache
 from typing import Literal
+from urllib.parse import quote
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -12,6 +13,14 @@ class Settings(BaseSettings):
 
     # SQLAlchemy URL, e.g. postgresql+psycopg://user:pass@host:5432/quantlab
     database_url: str = "postgresql+psycopg://quantlab:quantlab@localhost:5432/quantlab"
+    # Alternative to DATABASE_URL for platforms that inject the password on its
+    # own (AWS RDS-managed secrets on ECS). Used only when DB_HOST is set.
+    db_host: str = ""
+    db_port: int = 5432
+    db_name: str = "quantlab"
+    db_user: str = "quantlab"
+    db_password: SecretStr = SecretStr("")
+    db_sslmode: str = "require"
 
     # Shared secret the Next.js server sends as a Bearer token. The browser never sees it.
     api_internal_token: SecretStr = SecretStr("")
@@ -42,6 +51,16 @@ class Settings(BaseSettings):
     openai_api_key: SecretStr = SecretStr("")
     openai_model: str = "gpt-4o-mini"
     openai_base_url: str = "https://api.openai.com/v1"
+
+    @model_validator(mode="after")
+    def _url_from_parts(self):
+        if self.db_host:
+            pw = quote(self.db_password.get_secret_value(), safe="")
+            self.database_url = (
+                f"postgresql+psycopg://{quote(self.db_user, safe='')}:{pw}@{self.db_host}:"
+                f"{self.db_port}/{self.db_name}?sslmode={self.db_sslmode}"
+            )
+        return self
 
     @property
     def psycopg_url(self) -> str:
