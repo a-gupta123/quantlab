@@ -25,7 +25,8 @@ class Settings(BaseSettings):
     # Shared secret the Next.js server sends as a Bearer token. The browser never sees it.
     api_internal_token: SecretStr = SecretStr("")
 
-    storage_backend: Literal["local", "s3"] = "local"
+    # "db" keeps objects in PostgreSQL, for hosts without a persistent disk (Vercel).
+    storage_backend: Literal["local", "s3", "db"] = "local"
     local_storage_dir: str = "./var/storage"
     s3_bucket: str = ""
     s3_prefix: str = "quantlab/"
@@ -33,7 +34,9 @@ class Settings(BaseSettings):
     # Only used for local testing against S3-compatible endpoints.
     s3_endpoint_url: str | None = None
 
-    # Worker / queue
+    # Worker / queue. "inline" runs queued jobs inside API requests instead of a
+    # separate worker process, for serverless hosts with no always-on process.
+    job_execution: Literal["worker", "inline"] = "worker"
     worker_id: str = ""
     worker_poll_seconds: float = 1.0
     job_lease_seconds: int = 60
@@ -45,6 +48,14 @@ class Settings(BaseSettings):
     sentiment_batch_size: int = Field(default=16, ge=1, le=64)
     # When true the worker never downloads; the model must already be in HF_HOME.
     sentiment_local_files_only: bool = False
+    # "hf_api" calls the same model on Hugging Face's hosted inference instead of
+    # loading PyTorch locally (too large for serverless functions).
+    sentiment_backend: Literal["local", "hf_api"] = "local"
+    hf_token: SecretStr = SecretStr("")
+    hf_inference_url: str = "https://router.huggingface.co/hf-inference/models"
+
+    # Cap on strategy-chatbot messages per rolling 24 hours (OpenAI spend guard).
+    strategy_chat_daily_limit: int = Field(default=200, ge=0)
 
     # Optional LLM explanation for workflow summaries (off by default).
     llm_explanations_enabled: bool = False
@@ -54,6 +65,10 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _url_from_parts(self):
+        # Hosted Postgres (Neon, Heroku-style) hands out postgres:// URLs; use psycopg 3.
+        for prefix in ("postgres://", "postgresql://"):
+            if self.database_url.startswith(prefix):
+                self.database_url = "postgresql+psycopg://" + self.database_url[len(prefix) :]
         if self.db_host:
             pw = quote(self.db_password.get_secret_value(), safe="")
             self.database_url = (

@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
+from quantlab import inline
 from quantlab.api import schemas
 from quantlab.api.deps import Limit, Offset, SessionDep
 from quantlab.api.serializers import latest_job
@@ -63,6 +64,8 @@ def create(body: schemas.SentimentCreate, session: SessionDep):
     with session.begin():
         batch = create_batch(session, items)
         batch_id = batch.id
+    if inline.drain():
+        session.expire_all()
     with session.begin():
         return _batch_out(session, _load(session, batch_id))
 
@@ -80,6 +83,7 @@ def list_batches(session: SessionDep, limit: Limit = 10, offset: Offset = 0):
 
 @router.get("/batches/{batch_id}", response_model=schemas.SentimentBatchOut)
 def get_batch(batch_id: int, session: SessionDep):
+    inline.drain()
     with session.begin():
         batch = _load(session, batch_id)
         if batch is None:

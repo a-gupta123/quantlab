@@ -19,6 +19,10 @@ class ModelUnavailable(RuntimeError):
     """The model could not be loaded. Never substitute fake classifications."""
 
 
+class ModelBusy(RuntimeError):
+    """A transient hosted-inference condition; the job is retried."""
+
+
 class Classifier(Protocol):
     model_name: str
     revision: str
@@ -72,6 +76,60 @@ class FinBertClassifier:
         return results
 
 
+class HfApiClassifier:
+    """The same model served by Hugging Face Inference (SENTIMENT_BACKEND=hf_api).
+
+    The hosted endpoint serves the model's current main branch, so the stored
+    revision says so instead of claiming the pinned commit.
+    """
+
+    revision = "hf-inference (main, not pinned)"
+
+    def __init__(self, model_name: str, base_url: str, token: str, transport=None):
+        if not token:
+            raise ModelUnavailable(
+                "HF_TOKEN is not set; it is required for SENTIMENT_BACKEND=hf_api."
+            )
+        self.model_name = model_name
+        self._url = f"{base_url.rstrip('/')}/{model_name}"
+        self._headers = {"Authorization": f"Bearer {token}"}
+        self._transport = transport
+
+    def classify(self, texts: list[str]) -> list[dict[str, float]]:
+        import httpx
+
+        try:
+            with httpx.Client(transport=self._transport, timeout=60) as client:
+                resp = client.post(
+                    self._url,
+                    headers=self._headers,
+                    json={"inputs": texts, "parameters": {"top_k": len(LABELS)}},
+                )
+            if resp.status_code in (429, 503):
+                raise ModelBusy(
+                    f"Hugging Face is busy or loading the model (HTTP {resp.status_code})."
+                )
+            resp.raise_for_status()
+            outputs = resp.json()
+        except httpx.HTTPStatusError as exc:
+            raise ModelUnavailable(
+                f"Hugging Face inference failed (HTTP {exc.response.status_code})."
+            ) from exc
+        except (httpx.HTTPError, ValueError) as exc:
+            raise ModelUnavailable(f"Hugging Face inference failed: {exc}") from exc
+        if len(texts) == 1 and outputs and isinstance(outputs[0], dict):
+            outputs = [outputs]  # single input may come back unnested
+        if not isinstance(outputs, list) or len(outputs) != len(texts):
+            raise ModelUnavailable("Hugging Face returned an unexpected response shape.")
+        results = []
+        for scores in outputs:
+            by_label = {s["label"].lower(): float(s["score"]) for s in scores}
+            if set(by_label) != set(LABELS):
+                raise ModelUnavailable(f"Unexpected model labels: {sorted(by_label)}")
+            results.append(by_label)
+        return results
+
+
 _lock = threading.Lock()
 _classifier: Classifier | None = None
 _status = "not_loaded"
@@ -84,12 +142,19 @@ def get_classifier() -> Classifier:
             s = get_settings()
             _status = "loading"
             try:
-                _classifier = FinBertClassifier(
-                    s.sentiment_model_name,
-                    s.sentiment_model_revision,
-                    s.sentiment_batch_size,
-                    s.sentiment_local_files_only,
-                )
+                if s.sentiment_backend == "hf_api":
+                    _classifier = HfApiClassifier(
+                        s.sentiment_model_name,
+                        s.hf_inference_url,
+                        s.hf_token.get_secret_value(),
+                    )
+                else:
+                    _classifier = FinBertClassifier(
+                        s.sentiment_model_name,
+                        s.sentiment_model_revision,
+                        s.sentiment_batch_size,
+                        s.sentiment_local_files_only,
+                    )
             except ModelUnavailable as exc:
                 _status = f"unavailable: {str(exc)[:300]}"
                 raise

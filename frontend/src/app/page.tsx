@@ -53,12 +53,16 @@ export default async function Dashboard({ searchParams }: { searchParams: Search
           <Metric label="Completed" value={stats.data.by_status.completed ?? 0} />
           <Metric label="In progress" value={(stats.data.by_status.queued ?? 0) + (stats.data.by_status.running ?? 0)} />
           <Metric label="Failed" value={stats.data.by_status.failed ?? 0} />
-          <Metric
-            label="Workers online"
-            value={stats.data.workers_online}
-            className={stats.data.workers_online ? "text-emerald-700" : "text-rose-700"}
-            hint={stats.data.workers_online ? undefined : "Start the worker to process runs"}
-          />
+          {stats.data.execution_mode === "inline" ? (
+            <Metric label="Job runner" value="Serverless" className="text-emerald-700" hint="Runs execute inside each request" />
+          ) : (
+            <Metric
+              label="Workers online"
+              value={stats.data.workers_online}
+              className={stats.data.workers_online ? "text-emerald-700" : "text-rose-700"}
+              hint={stats.data.workers_online ? undefined : "Start the worker to process runs"}
+            />
+          )}
         </dl>
       )}
       {stats.data?.best_sharpe && (

@@ -74,6 +74,8 @@ def _turn(session, message: str, strategy_id: int | None) -> schemas.StrategyCha
         turn = strategies.chat(message, strategy_id)
     except NotFound as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+    except strategies.RateLimited as exc:
+        raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, str(exc)) from exc
     except strategy_builder.BuilderUnavailable as exc:
         code = (
             status.HTTP_503_SERVICE_UNAVAILABLE

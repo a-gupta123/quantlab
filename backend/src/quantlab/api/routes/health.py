@@ -3,6 +3,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import select, text
 
 from quantlab.api.deps import SessionDep, require_service_token
+from quantlab.config import get_settings
 from quantlab.models import Job, Worker
 
 router = APIRouter(tags=["health"])
@@ -61,7 +62,10 @@ def system(session: SessionDep):
         queue = dict(
             session.execute(select(Job.status, text("count(*)")).group_by(Job.status)).all()
         )
+    s = get_settings()
     return {
+        "execution_mode": s.job_execution,
+        "sentiment_backend": s.sentiment_backend,
         "workers": [dict(w._mapping) for w in workers],
         "queue": {s: queue.get(s, 0) for s in ("queued", "running", "completed", "failed")},
     }

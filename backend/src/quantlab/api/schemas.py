@@ -216,6 +216,8 @@ class StatsOut(BaseModel):
     by_status: dict[str, int]
     best_sharpe: ExperimentSummary | None
     workers_online: int
+    execution_mode: Literal["worker", "inline"] = "worker"
+    execution_mode: Literal["worker", "inline"] = "worker"
 
 
 # ------------------------------------------------------------------ workflows

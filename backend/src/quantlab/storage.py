@@ -118,7 +118,48 @@ class S3Storage:
             raise StorageError(f"S3 head failed for {key}: {exc}") from exc
 
 
+class DbStorage:
+    """Objects as rows in `stored_objects`. Each call uses its own short transaction,
+    so a put is durable before the caller records the key elsewhere."""
+
+    def put_bytes(self, key: str, data: bytes, content_type: str) -> str:
+        from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+        from quantlab.db import transaction
+        from quantlab.models import StoredObject
+
+        stmt = pg_insert(StoredObject).values(
+            key=_check_key(key), content_type=content_type, data=data
+        )
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["key"],
+            set_={"data": stmt.excluded.data, "content_type": stmt.excluded.content_type},
+        )
+        with transaction() as s:
+            s.execute(stmt)
+        return key
+
+    def get_bytes(self, key: str) -> bytes:
+        from quantlab.db import transaction
+        from quantlab.models import StoredObject
+
+        with transaction() as s:
+            obj = s.get(StoredObject, _check_key(key))
+            if obj is None:
+                raise StorageError(f"Object not found: {key}")
+            return obj.data
+
+    def exists(self, key: str) -> bool:
+        from quantlab.db import transaction
+        from quantlab.models import StoredObject
+
+        with transaction() as s:
+            return s.get(StoredObject, _check_key(key)) is not None
+
+
 def build_storage(settings: Settings) -> Storage:
+    if settings.storage_backend == "db":
+        return DbStorage()
     if settings.storage_backend == "s3":
         return S3Storage(
             settings.s3_bucket,

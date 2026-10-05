@@ -86,13 +86,15 @@ class Heartbeat:
 
 
 class Worker:
-    def __init__(self, worker_id: str | None = None, handlers=None):
+    def __init__(self, worker_id: str | None = None, handlers=None, register: bool = True):
         settings = get_settings()
         self.settings = settings
         self.id = (
             worker_id or settings.worker_id or f"{socket.gethostname()}-{uuid.uuid4().hex[:6]}"
         )
         self.handlers = handlers or _handlers()
+        # Inline (in-request) workers are ephemeral and skip the liveness table.
+        self.register = register
         self.started_at = datetime.now(UTC)
         self.stopping = False
         self.current_job: int | None = None
@@ -103,6 +105,8 @@ class Worker:
         return model_status()
 
     def report_alive(self) -> None:
+        if not self.register:
+            return
         with transaction() as s:
             jobs.upsert_worker(
                 s,

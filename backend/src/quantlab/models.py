@@ -14,6 +14,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    LargeBinary,
     String,
     Text,
     UniqueConstraint,
@@ -355,6 +356,17 @@ class ExperimentResult(Base):
     created_at: Mapped[datetime] = _created()
 
     experiment: Mapped[Experiment] = relationship(back_populates="result")
+
+
+class StoredObject(Base):
+    """Object storage in PostgreSQL (STORAGE_BACKEND=db), keyed like S3."""
+
+    __tablename__ = "stored_objects"
+
+    key: Mapped[str] = mapped_column(Text, primary_key=True)
+    content_type: Mapped[str] = mapped_column(Text, nullable=False)
+    data: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    created_at: Mapped[datetime] = _created()
 
 
 class Trade(Base):

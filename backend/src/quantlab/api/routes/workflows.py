@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import exists, func, select
 
-from quantlab import jobs
+from quantlab import inline, jobs
 from quantlab.api import schemas
 from quantlab.api.deps import Limit, Offset, SessionDep
 from quantlab.api.serializers import latest_job, summary_query, to_summary
@@ -84,6 +84,8 @@ def _node_progress(events: list[WorkflowEvent]) -> list[dict]:
 
 @router.get("/{run_id}", response_model=schemas.WorkflowDetail)
 def get_workflow(run_id: int, session: SessionDep):
+    if inline.drain():
+        session.expire_all()
     with session.begin():
         run = session.get(WorkflowRun, run_id)
         if run is None:

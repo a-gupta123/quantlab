@@ -201,6 +201,7 @@ export const statsSchema = z.object({
   by_status: z.record(z.string(), num),
   best_sharpe: experimentSummarySchema.nullable(),
   workers_online: num,
+  execution_mode: z.enum(["worker", "inline"]).default("worker"),
 });
 
 export const warmupSchema = z.object({
@@ -369,6 +370,8 @@ export const sentimentBatchSchema = z.object({
 export type SentimentBatch = z.infer<typeof sentimentBatchSchema>;
 
 export const systemSchema = z.object({
+  execution_mode: z.enum(["worker", "inline"]).default("worker"),
+  sentiment_backend: z.enum(["local", "hf_api"]).default("local"),
   workers: z.array(
     z.object({
       id: z.string(),

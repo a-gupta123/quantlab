@@ -9,10 +9,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
 from quantlab import strategy_builder
+from quantlab.config import get_settings
 from quantlab.db import transaction
 from quantlab.models import CustomStrategy, StrategyMessage, StrategyVersion
 from quantlab.services import NotFound
@@ -46,7 +47,30 @@ def _context(strategy_id: int) -> tuple[list[dict[str, str]], dict | None]:
         return history, (latest.spec if latest else None)
 
 
+class RateLimited(RuntimeError):
+    pass
+
+
+def _check_daily_limit() -> None:
+    limit = get_settings().strategy_chat_daily_limit
+    with transaction() as s:
+        used = s.scalar(
+            select(func.count())
+            .select_from(StrategyMessage)
+            .where(
+                StrategyMessage.role == "user",
+                StrategyMessage.created_at > func.now() - text("interval '24 hours'"),
+            )
+        )
+    if used >= limit:
+        raise RateLimited(
+            f"The strategy builder's limit of {limit} messages per 24 hours has been reached. "
+            "Try again later."
+        )
+
+
 def chat(message: str, strategy_id: int | None = None, transport=None) -> ChatTurn:
+    _check_daily_limit()
     history, previous = _context(strategy_id) if strategy_id else ([], None)
     result = strategy_builder.build(message, history, previous, transport=transport)
 

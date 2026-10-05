@@ -87,7 +87,8 @@ function JobPanel({ e }: { e: ExperimentDetail }) {
       )}
       {e.status === "queued" && (
         <p className="mt-2 text-xs text-slate-600">
-          If this stays queued, check that the worker process is running (dashboard shows workers online).
+          If this stays queued, check the dashboard: it shows whether a worker is online (or that runs execute
+          serverlessly, in which case refreshing this page retries it).
         </p>
       )}
     </section>

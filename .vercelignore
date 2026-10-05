@@ -1,0 +1,18 @@
+# Never upload secrets or local state to Vercel.
+.env
+.env.*
+!.env.example
+**/.venv
+**/node_modules
+**/.next
+**/__pycache__
+**/.pytest_cache
+**/.ruff_cache
+backend/var
+data
+infra
+tests
+scripts
+frontend/test-results
+frontend/playwright-report
+.github

@@ -5,9 +5,11 @@ from fastapi import APIRouter, HTTPException, Query, Response, status
 from sqlalchemy import delete as sql_delete
 from sqlalchemy import func, select, text
 
+from quantlab import inline
 from quantlab.api import schemas
 from quantlab.api.deps import Limit, Offset, SessionDep
 from quantlab.api.serializers import experiment_detail, summary_query, to_summary
+from quantlab.config import get_settings
 from quantlab.models import Experiment, ExperimentResult, Job, Worker
 from quantlab.services import (
     ExperimentRequest,
@@ -91,6 +93,7 @@ def stats(session: SessionDep):
         by_status={s: counts.get(s, 0) for s in ("queued", "running", "completed", "failed")},
         best_sharpe=to_summary(best) if best else None,
         workers_online=online,
+        execution_mode=get_settings().job_execution,
     )
 
 
@@ -103,6 +106,8 @@ def create(body: schemas.ExperimentCreate, session: SessionDep):
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
     except InvalidRequest as exc:
         raise HTTPException(422, str(exc)) from exc
+    if inline.drain():
+        session.expire_all()
     with session.begin():
         return experiment_detail(session, session.get(Experiment, exp.id))
 
@@ -141,6 +146,7 @@ def compare(session: SessionDep, ids: Annotated[str, Query(max_length=60)]):
 
 @router.get("/{experiment_id}", response_model=schemas.ExperimentDetail)
 def get_experiment(experiment_id: int, session: SessionDep):
+    inline.drain()
     with session.begin():
         exp = session.get(Experiment, experiment_id)
         if exp is None:
@@ -189,6 +195,8 @@ def rerun(experiment_id: int, session: SessionDep):
         raise HTTPException(404, str(exc)) from exc
     except InvalidRequest as exc:
         raise HTTPException(422, str(exc)) from exc
+    if inline.drain():
+        session.expire_all()
     with session.begin():
         return experiment_detail(session, session.get(Experiment, new.id))
 
