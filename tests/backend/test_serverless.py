@@ -95,7 +95,6 @@ def serverless(db_env, monkeypatch):
     get_storage.cache_clear()
 
 
-
 @pytest.mark.db
 def test_db_storage_roundtrip(serverless):
     st = DbStorage()
@@ -201,8 +200,9 @@ def test_inline_retry_is_picked_up_by_polling(serverless, monkeypatch):
 
 @pytest.mark.db
 def test_chatbot_daily_limit(serverless, monkeypatch):
-    from quantlab import strategy_builder
     from test_strategy_builder import answer
+
+    from quantlab import strategy_builder
 
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
     monkeypatch.setenv("STRATEGY_CHAT_DAILY_LIMIT", "1")

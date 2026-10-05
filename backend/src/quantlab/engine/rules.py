@@ -392,3 +392,128 @@ def describe(spec: RuleSpec) -> list[str]:
     if spec.max_holding_days:
         lines.append(f"Maximum holding period: {spec.max_holding_days} trading days")
     return lines
+
+
+_PRICE_WORDS = {
+    "close": "the closing price",
+    "open": "the opening price",
+    "high": "the day's high",
+    "low": "the day's low",
+    "volume": "volume",
+}
+_OP_WORDS = {
+    ">": "is above",
+    "<": "is below",
+    ">=": "is at or above",
+    "<=": "is at or below",
+    "crosses_above": "crosses above",
+    "crosses_below": "crosses below",
+}
+_PERCENT_INDICATORS = {"return_pct", "volatility_pct"}
+
+
+def _operand_words(o: Operand, percent: bool = False) -> str:
+    if o.kind == "value":
+        return f"{o.value:g}%" if percent else f"{o.value:g}"
+    ind, p = o.indicator, o.period
+    if ind in PRICE_FIELDS:
+        base = _PRICE_WORDS[ind]
+    elif ind in ("sma", "ema"):
+        kind = "average" if ind == "sma" else "exponential average"
+        of = "" if (o.source or "close") == "close" else f" of {_PRICE_WORDS[o.source]}"
+        base = f"the {p}-day {kind}{of}"
+    elif ind == "rsi":
+        base = f"the {p}-day RSI"
+    elif ind in MACD_FAMILY:
+        name = {
+            "macd": "the MACD line",
+            "macd_signal": "the MACD signal line",
+            "macd_hist": "the MACD histogram",
+        }[ind]
+        fast, slow, sig = o.fast or 12, o.slow or 26, o.signal_period or 9
+        base = name if (fast, slow, sig) == (12, 26, 9) else f"{name} ({fast}/{slow}/{sig})"
+    elif ind and ind.startswith("bb_"):
+        band = {"bb_upper": "upper", "bb_middle": "middle", "bb_lower": "lower"}[ind]
+        width = o.std_mult or 2
+        base = (
+            f"the {band} Bollinger band ({p}-day" + ("" if width == 2 else f", {width:g} std") + ")"
+        )
+    elif ind == "highest_high":
+        base = f"the highest high of the previous {p} days"
+    elif ind == "lowest_low":
+        base = f"the lowest low of the previous {p} days"
+    elif ind == "return_pct":
+        base = f"the {p}-day % change"
+    else:
+        base = f"the {p}-day volatility"
+    if o.offset:
+        base = f"{base} {o.offset} day{'s' if o.offset > 1 else ''} ago"
+    if o.scale != 1.0:
+        diff = abs(o.scale - 1) * 100
+        if diff < 50:
+            base = f"{base} {'+' if o.scale > 1 else '−'} {diff:.4g}%"
+        else:
+            base = f"{o.scale:g}× {base}"
+    return base
+
+
+def _comparison_words(c: Comparison) -> str:
+    def pct(side: Operand, other: Operand) -> bool:
+        return side.kind == "value" and other.indicator in _PERCENT_INDICATORS
+
+    left = _operand_words(c.left, pct(c.left, c.right))
+    right = _operand_words(c.right, pct(c.right, c.left))
+    return f"{left} {_OP_WORDS[c.op]} {right}"
+
+
+def _condition_words(c: Condition) -> str:
+    def join(mode: str, items: list[str]) -> str:
+        return (" and " if mode == "all" else " or ").join(items)
+
+    parts = [_comparison_words(r) for r in c.rules]
+    for g in c.groups:
+        inner = join(g.mode, [_comparison_words(r) for r in g.rules])
+        parts.append(f"({inner})" if len(g.rules) > 1 else inner)
+    return join(c.mode, parts)
+
+
+def explain(spec: RuleSpec) -> list[str]:
+    """The same rules as `describe`, in plain English for non-programmers."""
+    lines = [
+        {
+            "long_only": "Only buys. When not in a trade, the money sits in cash.",
+            "short_only": "Only sells short (bets on a fall). Otherwise it sits in cash.",
+            "long_short": "Can buy (bet on a rise) or sell short (bet on a fall).",
+        }[spec.direction]
+    ]
+    for label, c in (
+        ("Buy when", spec.long_entry),
+        ("Sell when", spec.long_exit),
+        ("Sell short when", spec.short_entry),
+        ("Buy back the short when", spec.short_exit),
+    ):
+        if c:
+            lines.append(f"{label} {_condition_words(c)}.")
+    if spec.stop_loss_pct:
+        lines.append(
+            f"Stop-loss: exit if a trade is down {spec.stop_loss_pct:g}% (checked at each close)."
+        )
+    if spec.take_profit_pct:
+        lines.append(
+            f"Take-profit: exit once a trade is up {spec.take_profit_pct:g}% "
+            "(checked at each close)."
+        )
+    if spec.max_holding_days:
+        lines.append(f"Never hold a trade longer than {spec.max_holding_days} trading days.")
+    risk_exit = spec.stop_loss_pct or spec.take_profit_pct or spec.max_holding_days
+    if not risk_exit:
+        if spec.direction == "long_only" and not spec.long_exit:
+            lines.append(
+                "There is no sell rule, so once it buys it holds until the end of the test."
+            )
+        if spec.direction == "short_only" and not spec.short_exit:
+            lines.append(
+                "There is no exit rule, so once it shorts it stays short until the end of the test."
+            )
+    lines.append("Signals are checked at each day's close; trades happen at the next day's open.")
+    return lines

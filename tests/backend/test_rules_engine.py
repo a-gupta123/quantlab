@@ -4,7 +4,7 @@ from helpers import make_bars, random_walk_bars
 from pydantic import ValidationError
 
 from quantlab.engine.backtest import BacktestInputError, StrategyParams, run_backtest
-from quantlab.engine.rules import RuleSpec, Series, describe, ema, rsi
+from quantlab.engine.rules import RuleSpec, Series, describe, ema, explain, rsi
 
 
 def ind(name, **kw):
@@ -256,6 +256,45 @@ def test_describe_is_readable():
     lines = describe(spec(direction="long_only", long_entry=UP_DAY, stop_loss_pct=5))
     assert lines[1] == "Enter long when: close > close[1 bars ago]"
     assert "Stop-loss: 5%" in lines[2]
+
+
+def test_explain_reads_like_english():
+    s = spec(
+        direction="long_short",
+        long_entry={
+            "mode": "all",
+            "rules": [
+                {"left": ind("close"), "op": "crosses_above", "right": ind("sma", period=50)},
+                {"left": ind("rsi", period=14), "op": "<", "right": val(70)},
+            ],
+        },
+        short_entry={
+            "mode": "any",
+            "rules": [
+                {"left": ind("return_pct", period=5), "op": "<", "right": val(-3)},
+                {"left": ind("close"), "op": ">", "right": ind("bb_upper", period=20, scale=1.02)},
+            ],
+        },
+        stop_loss_pct=5,
+    )
+    lines = explain(s)
+    assert lines[0].startswith("Can buy")
+    assert lines[1] == (
+        "Buy when the closing price crosses above the 50-day average "
+        "and the 14-day RSI is below 70."
+    )
+    assert lines[2] == (
+        "Sell short when the 5-day % change is below -3% or the closing price is above "
+        "the upper Bollinger band (20-day) + 2%."
+    )
+    assert lines[3].startswith("Stop-loss: exit if a trade is down 5%")
+    assert "sma(" not in " ".join(lines)
+
+
+def test_explain_flags_a_strategy_with_no_way_out():
+    lines = explain(spec(direction="long_only", long_entry=UP_DAY))
+    assert lines[1] == "Buy when the closing price is above the closing price 1 day ago."
+    assert any("no sell rule" in line for line in lines)
 
 
 def test_volume_missing_never_triggers():

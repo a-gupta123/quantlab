@@ -6,7 +6,7 @@ from sqlalchemy import Select, select
 from sqlalchemy.orm import Session
 
 from quantlab.api import schemas
-from quantlab.engine.rules import RuleSpec, describe
+from quantlab.engine.rules import RuleSpec, describe, explain
 from quantlab.models import (
     CustomStrategy,
     Dataset,
@@ -80,12 +80,14 @@ def strategy_config_out(cfg: StrategyConfig) -> schemas.StrategyConfigOut:
     out = schemas.StrategyConfigOut.model_validate(cfg)
     v = cfg.strategy_version
     if v is not None:
+        spec = RuleSpec.model_validate(v.spec)
         out.rules = schemas.RulesRef(
             strategy_id=v.strategy_id,
             name=v.strategy.name,
             version=v.version,
             fidelity=v.fidelity,
-            rules_text=describe(RuleSpec.model_validate(v.spec)),
+            rules_text=describe(spec),
+            plain_rules=explain(spec),
         )
     return out
 
@@ -132,6 +134,7 @@ def version_out(v: StrategyVersion) -> schemas.StrategyVersionOut:
         version=v.version,
         spec=v.spec,
         rules_text=describe(spec),
+        plain_rules=explain(spec),
         requirements=v.requirements,
         fidelity=v.fidelity,
         summary=v.summary,

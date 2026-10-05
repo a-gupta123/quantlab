@@ -29,3 +29,6 @@ frontend/test-results/
 frontend/playwright-report/
 
 .DS_Store
+
+# Terraform inputs may name real account resources
+infra/terraform.tfvars

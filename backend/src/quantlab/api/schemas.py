@@ -105,6 +105,7 @@ class RulesRef(BaseModel):
     version: int
     fidelity: float
     rules_text: list[str]
+    plain_rules: list[str]
 
 
 class StrategyConfigOut(ORM):
@@ -336,6 +337,7 @@ class StrategyVersionOut(BaseModel):
     version: int
     spec: dict[str, Any]
     rules_text: list[str]
+    plain_rules: list[str]
     requirements: list[RequirementOut]
     fidelity: float
     summary: str

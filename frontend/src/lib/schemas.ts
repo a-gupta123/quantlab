@@ -150,6 +150,7 @@ export const strategyConfigSchema = z.object({
       version: num,
       fidelity: num,
       rules_text: z.array(z.string()),
+      plain_rules: z.array(z.string()).default([]),
     })
     .nullable()
     .optional(),
@@ -225,6 +226,7 @@ export const strategyVersionSchema = z.object({
   version: num,
   spec: z.record(z.string(), z.unknown()),
   rules_text: z.array(z.string()),
+  plain_rules: z.array(z.string()).default([]),
   requirements: z.array(requirementSchema),
   fidelity: num,
   summary: z.string(),

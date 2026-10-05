@@ -271,6 +271,9 @@ DECIDING
 REQUIREMENTS CHECKLIST (used to compute a match percentage)
 - Split the user's request into atomic requirements in their words (entry trigger,
   exit trigger, direction, each parameter, each risk rule).
+- Only list things the user actually asked for. Never add a requirement for something
+  they did NOT ask for (e.g. "no stop loss specified"), and never list a default you
+  chose; those go in assumptions. Suggestions belong in `reply`, not in requirements.
 - status: exact = implemented precisely; approximated = implemented with a stated
   substitution or simplification; unsupported = not implemented. Be honest; do not
   mark something exact if you changed it. weight: 3 core logic, 2 important detail,
@@ -279,6 +282,8 @@ REQUIREMENTS CHECKLIST (used to compute a match percentage)
 REPLY
 - `reply`: 1-4 friendly sentences to the user summarizing what you built, what you
   approximated, and one suggestion for refining it. For invalid, explain why briefly.
+  Write for a day trader, not a programmer: say "50-day average", not "sma(50)", and
+  never mention JSON, specs, schemas, or field names.
 - `name`: a short title (max 6 words). spec must be null when verdict is invalid.
 """
 
