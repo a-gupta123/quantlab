@@ -48,9 +48,7 @@ What I did myself, from the prompts and not from a hidden edit: created the GitH
 
 ## One place AI got it wrong
 
-During the FinBERT smoke test, a clearly positive headline (a regional bank beating estimates and raising its dividend) came back negative. The agent first treated that as a Transformers label-mapping bug and started checking `id2label` and whether the classifier weights had loaded. The cause was the agent's own input. It had prefixed sample headlines with the literal string `SAMPLE:` and then fed that string to the model, which was enough to flip the classification. The prefix was removed from the text sent to FinBERT. Sample headlines are marked with a `source` field and a UI label instead. The lesson is to inspect the string you added before blaming the library for a bad score.
-
-A second miss showed up in public, and I had to point at it. On October 6 the live strategy builder said there was no OpenAI key after I had already saved `OPENAI_API_KEY`. The key was only in the local `.env`. The Vercel API has its own environment, and the agent had deployed without copying the key there. I said so in the prompt below ("the strategy builder says there is no openai api key when i already put in the api key"). The fix was to set the key on the Vercel project, not to keep editing the laptop file.
+One place AI got it wrong was that it started using demo datasets. These were synthetic and fabricated by the AI, which means they were not very useful for the purpose of backtesting real trading strategies. So I made the AI replace that with actual finance data sourced from yahoo finance, which I know is a credible source.
 
 ## How the time was spent
 
